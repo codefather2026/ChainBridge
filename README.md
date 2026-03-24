@@ -420,6 +420,7 @@ docker-compose ps
 - [HTLC Protocol Specification](./docs/HTLC.md)
 - [Relayer Setup Guide](./docs/RELAYER.md)
 - [API Reference](./docs/API.md)
+- [Security Considerations](./docs/SECURITY.md)
 
 ---
 
