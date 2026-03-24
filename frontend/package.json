@@ -6,14 +6,17 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "type-check": "tsc --noEmit"
   },
   "dependencies": {
     "next": "14.1.0",
     "react": "^18",
     "react-dom": "^18",
     "@stellar/freighter-api": "^1.7.0",
-    "stellar-sdk": "^11.2.0",
+    "@stellar/stellar-sdk": "^11.2.0",
     "ethers": "^6.10.0",
     "bitcoinjs-lib": "^6.1.5",
     "axios": "^1.6.5"
@@ -27,6 +30,9 @@
     "postcss": "^8.4.33",
     "tailwindcss": "^3.4.1",
     "eslint": "^8",
-    "eslint-config-next": "14.1.0"
+    "eslint-config-next": "14.1.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.2.5",
+    "@types/bitcoinjs-lib": "^5.0.1"
   }
 }
