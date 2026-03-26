@@ -21,6 +21,14 @@ pub enum HTLCStatus {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MultiSigConfig {
+    pub signers: soroban_sdk::Vec<Address>,
+    pub threshold: u32,
+    pub signatures: soroban_sdk::Vec<Address>,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[allow(clippy::upper_case_acronyms)]
 pub enum Chain {
     Bitcoin,
@@ -52,6 +60,7 @@ pub struct HTLC {
     pub status: HTLCStatus,
     pub secret: Option<Bytes>,
     pub created_at: u64,
+    pub multi_sig: Option<MultiSigConfig>,
     /// Hash algorithm used for this HTLC's hash lock.
     pub hash_algorithm: HashAlgorithm,
 }
@@ -80,6 +89,16 @@ pub struct SwapOrder {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SwapState {
+    Initiated,
+    Funded,
+    Executed,
+    Refunded,
+    Failed,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CrossChainSwap {
     pub id: u64,
     pub stellar_htlc_id: u64,
@@ -87,7 +106,8 @@ pub struct CrossChainSwap {
     pub other_chain_tx: String,
     pub stellar_party: Address,
     pub other_party: String,
-    pub completed: bool,
+    pub state: SwapState,
+    pub updated_at: u64,
 }
 
 #[contracttype]

@@ -1,7 +1,7 @@
 use crate::crypto;
 use crate::error::Error;
 use crate::storage;
-use crate::types::{HTLCStatus, HashAlgorithm, HTLC};
+use crate::types::{HTLCStatus, HashAlgorithm, HTLC, MultiSigConfig};
 use soroban_sdk::{Address, Bytes, BytesN, Env};
 
 /// Creates a new HTLC using SHA256 as the hash algorithm (default, Bitcoin-compatible).
@@ -12,7 +12,12 @@ pub fn create_htlc(
     amount: i128,
     hash_lock: BytesN<32>,
     time_lock: u64,
+    multi_sig: Option<MultiSigConfig>,
 ) -> Result<u64, Error> {
+    if storage::is_paused(env) {
+        return Err(Error::Paused);
+    }
+
     create_htlc_with_algorithm(
         env,
         sender,
@@ -20,6 +25,7 @@ pub fn create_htlc(
         amount,
         hash_lock,
         time_lock,
+        multi_sig,
         HashAlgorithm::SHA256,
     )
 }
@@ -35,6 +41,7 @@ pub fn create_htlc_with_algorithm(
     amount: i128,
     hash_lock: BytesN<32>,
     time_lock: u64,
+    multi_sig: Option<MultiSigConfig>,
     algorithm: HashAlgorithm,
 ) -> Result<u64, Error> {
     if amount <= 0 {
@@ -57,6 +64,7 @@ pub fn create_htlc_with_algorithm(
         status: HTLCStatus::Active,
         secret: None,
         created_at: current_time,
+        multi_sig,
         hash_algorithm: algorithm,
     };
 
@@ -69,6 +77,10 @@ pub fn create_htlc_with_algorithm(
 /// Uses the algorithm stored in the HTLC and constant-time comparison
 /// to prevent timing-based side channel attacks.
 pub fn claim_htlc(env: &Env, htlc_id: u64, secret: Bytes) -> Result<(), Error> {
+    if storage::is_paused(env) {
+        return Err(Error::Paused);
+    }
+
     let mut htlc = storage::read_htlc(env, htlc_id).ok_or(Error::HTLCNotFound)?;
 
     if htlc.status != HTLCStatus::Active {
@@ -78,6 +90,12 @@ pub fn claim_htlc(env: &Env, htlc_id: u64, secret: Bytes) -> Result<(), Error> {
     let current_time = env.ledger().timestamp();
     if current_time >= htlc.time_lock {
         return Err(Error::HTLCExpired);
+    }
+
+    if let Some(config) = &htlc.multi_sig {
+        if config.signatures.len() < config.threshold {
+            return Err(Error::ThresholdNotMet);
+        }
     }
 
     // Verify the secret preimage using constant-time comparison to prevent
@@ -94,6 +112,10 @@ pub fn claim_htlc(env: &Env, htlc_id: u64, secret: Bytes) -> Result<(), Error> {
 }
 
 pub fn refund_htlc(env: &Env, htlc_id: u64, sender: &Address) -> Result<(), Error> {
+    if storage::is_paused(env) {
+        return Err(Error::Paused);
+    }
+
     let mut htlc = storage::read_htlc(env, htlc_id).ok_or(Error::HTLCNotFound)?;
 
     if htlc.sender != *sender {
@@ -141,4 +163,30 @@ pub fn get_htlc_status(env: &Env, htlc_id: u64) -> Result<HTLCStatus, Error> {
 pub fn get_revealed_secret(env: &Env, htlc_id: u64) -> Result<Option<Bytes>, Error> {
     let htlc = storage::read_htlc(env, htlc_id).ok_or(Error::HTLCNotFound)?;
     Ok(htlc.secret)
+}
+
+pub fn sign_htlc(env: &Env, htlc_id: u64, signer: &Address) -> Result<(), Error> {
+    if storage::is_paused(env) {
+        return Err(Error::Paused);
+    }
+
+    let mut htlc = storage::read_htlc(env, htlc_id).ok_or(Error::HTLCNotFound)?;
+
+    if htlc.status != HTLCStatus::Active {
+        return Err(Error::AlreadyClaimed); // or similar error
+    }
+
+    if let Some(mut config) = htlc.multi_sig.clone() {
+        if !config.signers.contains(signer) {
+            return Err(Error::SignerNotAuthorized);
+        }
+        if !config.signatures.contains(signer) {
+            config.signatures.push_back(signer.clone());
+            htlc.multi_sig = Some(config);
+            storage::write_htlc(env, htlc_id, &htlc);
+        }
+        Ok(())
+    } else {
+        Err(Error::SignerNotAuthorized)
+    }
 }

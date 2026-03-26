@@ -60,3 +60,5 @@ coverage/
 # Misc
 *.bak
 *.tmp
+issue.md
+pr.md

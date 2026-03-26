@@ -38,9 +38,10 @@ impl ChainBridge {
         amount: i128,
         hash_lock: soroban_sdk::BytesN<32>,
         time_lock: u64,
+        multi_sig: Option<crate::types::MultiSigConfig>,
     ) -> Result<u64, Error> {
         sender.require_auth();
-        htlc::create_htlc(&env, &sender, &receiver, amount, hash_lock, time_lock)
+        htlc::create_htlc(&env, &sender, &receiver, amount, hash_lock, time_lock, multi_sig)
     }
 
     /// Claim HTLC by revealing the secret
@@ -143,6 +144,54 @@ impl ChainBridge {
         }
         storage::add_supported_chain(&env, chain_id);
         Ok(())
+    }
+
+    /// Pause contract
+    pub fn pause(env: Env, admin: Address) -> Result<(), Error> {
+        admin.require_auth();
+        let stored_admin = storage::read_admin(&env);
+        if admin != stored_admin {
+            return Err(Error::Unauthorized);
+        }
+        storage::set_paused(&env, true);
+        Ok(())
+    }
+
+    /// Unpause contract 
+    pub fn unpause(env: Env, admin: Address) -> Result<(), Error> {
+        admin.require_auth();
+        let stored_admin = storage::read_admin(&env);
+        if admin != stored_admin {
+            return Err(Error::Unauthorized);
+        }
+        storage::set_paused(&env, false);
+        Ok(())
+    }
+
+    /// Set Fee Rate
+    pub fn set_fee_rate(env: Env, admin: Address, rate: u32) -> Result<(), Error> {
+        admin.require_auth();
+        if admin != storage::read_admin(&env) {
+            return Err(Error::Unauthorized);
+        }
+        storage::set_fee_rate(&env, rate);
+        Ok(())
+    }
+
+    /// Set Fee Treasury
+    pub fn set_fee_treasury(env: Env, admin: Address, treasury: Address) -> Result<(), Error> {
+        admin.require_auth();
+        if admin != storage::read_admin(&env) {
+            return Err(Error::Unauthorized);
+        }
+        storage::set_fee_treasury(&env, &treasury);
+        Ok(())
+    }
+
+    /// Sign HTLC for MultiSig
+    pub fn sign_htlc(env: Env, htlc_id: u64, signer: Address) -> Result<(), Error> {
+        signer.require_auth();
+        htlc::sign_htlc(&env, htlc_id, &signer)
     }
 
     /// Get storage metrics

@@ -21,4 +21,12 @@ pub enum Error {
     OrderExpired = 15,
     InvalidChain = 16,
     ProofVerificationFailed = 17,
+    Paused = 18,
+    AmountTooSmall = 19,
+    FeeCollectionFailed = 20,
+    InvalidFeeRate = 21,
+    ThresholdNotMet = 22,
+    SignerNotAuthorized = 23,
+    RecoveryFailed = 24,
+    Timeout = 25,
 }

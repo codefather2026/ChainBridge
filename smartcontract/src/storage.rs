@@ -36,6 +36,9 @@ pub enum DataKey {
     ExpiredHTLCs,
     ExpiredHTLCQueue(u64),
     StorageMetrics,
+    Paused,
+    FeeRate,
+    FeeTreasury,
     /// Index of open order IDs for a specific chain pair (encoded as u64).
     ChainPairOrders(u64),
 }
@@ -52,6 +55,30 @@ pub fn read_admin(env: &Env) -> Address {
 
 pub fn write_admin(env: &Env, admin: &Address) {
     env.storage().instance().set(&DataKey::Admin, admin);
+}
+
+pub fn is_paused(env: &Env) -> bool {
+    env.storage().instance().get(&DataKey::Paused).unwrap_or(false)
+}
+
+pub fn set_paused(env: &Env, paused: bool) {
+    env.storage().instance().set(&DataKey::Paused, &paused);
+}
+
+pub fn get_fee_rate(env: &Env) -> u32 {
+    env.storage().instance().get(&DataKey::FeeRate).unwrap_or(30)
+}
+
+pub fn set_fee_rate(env: &Env, rate: u32) {
+    env.storage().instance().set(&DataKey::FeeRate, &rate);
+}
+
+pub fn get_fee_treasury(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKey::FeeTreasury)
+}
+
+pub fn set_fee_treasury(env: &Env, treasury: &Address) {
+    env.storage().instance().set(&DataKey::FeeTreasury, treasury);
 }
 
 pub fn get_htlc_counter(env: &Env) -> u64 {
