@@ -1,35 +1,113 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { OrderBookList } from "@/components/marketplace/OrderBookList";
 import { OrderTakeModal } from "@/components/marketplace/OrderTakeModal";
 import { DepthChart } from "@/components/marketplace/DepthChart";
 import { useOrderBookStore, useMockOrders } from "@/hooks/useOrderBook";
-import { Order, OrderStatus } from "@/types";
+import { useTransactionStore } from "@/hooks/useTransactions";
+import { Order, OrderStatus, TransactionStatus } from "@/types";
 import { Badge, Button } from "@/components/ui";
 import { ShoppingBag, TrendingUp, Info, Plus } from "lucide-react";
+import {
+  buildCompletedLifecycle,
+  buildTransactionLifecycle,
+  sleep,
+} from "@/lib/transactionLifecycle";
+import { getExplorerUrl } from "@/lib/explorers";
+import { useWalletStore } from "@/hooks/useWallet";
+
+function fundingChainForOrder(order: Order) {
+  return order.side === "buy" ? order.chainOut : order.chainIn;
+}
+
+function fundingAmountForOrder(order: Order) {
+  return order.side === "buy" ? order.total : order.amount;
+}
+
+function fundingTokenForOrder(order: Order) {
+  return order.side === "buy" ? order.tokenOut : order.tokenIn;
+}
 
 export default function MarketplacePage() {
   const { orders, updateOrder } = useOrderBookStore();
   const { seedMockOrders } = useMockOrders();
+  const { address } = useWalletStore();
+  const transactions = useTransactionStore((state) => state.transactions);
+  const addTransaction = useTransactionStore((state) => state.addTransaction);
+  const updateTransaction = useTransactionStore((state) => state.updateTransaction);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [workflowTxId, setWorkflowTxId] = useState<string | null>(null);
 
   useEffect(() => {
-    seedMockOrders();
-  }, [seedMockOrders]);
+    seedMockOrders(address ?? undefined);
+  }, [address, seedMockOrders]);
 
   const handleTakeOrder = (order: Order) => {
     setSelectedOrder(order);
     setIsModalOpen(true);
   };
 
-  const confirmTakeOrder = (order: Order) => {
-    // In a real app, this would initiate the HTLC lock transaction
+  const workflowTx =
+    transactions.find((transaction) => transaction.id === workflowTxId) ?? null;
+
+  const confirmTakeOrder = async (order: Order) => {
+    const chain = fundingChainForOrder(order);
+    const txId = `match-${order.id}`;
+    const hash = `0x${Date.now().toString(16)}${order.id.slice(-4)}`;
+
+    setWorkflowTxId(txId);
+
+    addTransaction({
+      id: txId,
+      hash: "pending",
+      chain,
+      type: "swap_lock",
+      amount: fundingAmountForOrder(order),
+      token: fundingTokenForOrder(order),
+      status: TransactionStatus.PENDING,
+      confirmations: 0,
+      requiredConfirmations: 1,
+      timestamp: new Date().toISOString(),
+      counterparty: order.maker,
+      explorerUrl: getExplorerUrl(chain, hash),
+      lifecycle: buildTransactionLifecycle(chain, "approval"),
+    });
+
+    await sleep(600);
+    updateTransaction(txId, {
+      lifecycle: buildTransactionLifecycle(chain, "sign"),
+    });
+
+    await sleep(800);
+    updateTransaction(txId, {
+      hash,
+      status: TransactionStatus.CONFIRMING,
+      lifecycle: buildTransactionLifecycle(chain, "broadcast"),
+    });
+
+    await sleep(900);
+    updateTransaction(txId, {
+      status: TransactionStatus.CONFIRMING,
+      lifecycle: buildTransactionLifecycle(chain, "confirm"),
+    });
+
+    await sleep(1100);
+    updateTransaction(txId, {
+      status: TransactionStatus.COMPLETED,
+      confirmations: 1,
+      proofVerified: true,
+      lifecycle: buildCompletedLifecycle(chain),
+    });
     updateOrder(order.id, { status: OrderStatus.FILLED });
+  };
+
+  const closeDrawer = () => {
     setIsModalOpen(false);
-    // Redirect or show success (omitted for brevity, assume success toast)
-    console.log(`Executing order ${order.id}`);
+    setSelectedOrder(null);
+    setWorkflowTxId(null);
   };
 
   return (
@@ -54,9 +132,11 @@ export default function MarketplacePage() {
         </div>
 
         <div className="flex flex-col gap-4 sm:flex-row">
-          <Button variant="secondary" className="h-12 px-6">
-            My Orders
-          </Button>
+          <Link href="/orders">
+            <Button variant="secondary" className="h-12 px-6">
+              My Orders
+            </Button>
+          </Link>
           <Button variant="primary" className="h-12 px-6 shadow-glow-md" icon={<Plus size={18} />}>
             Create Order
           </Button>
@@ -118,8 +198,9 @@ export default function MarketplacePage() {
       <OrderTakeModal
         order={selectedOrder}
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
+        onClose={closeDrawer}
         onConfirm={confirmTakeOrder}
+        workflowTx={workflowTx}
       />
     </div>
   );

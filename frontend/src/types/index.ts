@@ -43,6 +43,26 @@ export enum TransactionStatus {
   FAILED = "failed",
 }
 
+export type TransactionStepKey = "approval" | "sign" | "broadcast" | "confirm";
+
+export type TransactionStepStatus = "idle" | "active" | "completed" | "error";
+
+export interface TransactionStep {
+  key: TransactionStepKey;
+  label: string;
+  status: TransactionStepStatus;
+  description: string;
+  chain?: string;
+  errorMessage?: string;
+}
+
+export interface TransactionLifecycle {
+  currentStep: TransactionStepKey;
+  steps: TransactionStep[];
+  retryable?: boolean;
+  errorMessage?: string;
+}
+
 export interface Transaction {
   id: string;
   hash: string;
@@ -56,6 +76,9 @@ export interface Transaction {
   timestamp: string;
   counterparty?: string;
   proofVerified?: boolean;
+  explorerUrl?: string;
+  lifecycle?: TransactionLifecycle;
+  failureReason?: string;
 }
 
 export interface TransactionStore {
@@ -74,6 +97,7 @@ export enum OrderStatus {
   OPEN = "open",
   FILLED = "filled",
   CANCELLED = "cancelled",
+  EXPIRED = "expired",
 }
 
 export interface Order {
@@ -95,6 +119,9 @@ export interface Order {
   expiresAt?: string;
   allowPartialFills?: boolean;
   amendmentCount?: number;
+  minFillAmount?: string;
+  makerFeeEstimate?: string;
+  takerFeeEstimate?: string;
 }
 
 export interface OrderBookStore {

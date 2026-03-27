@@ -93,11 +93,12 @@ export function OrderBookList({ orders, onTakeOrder, userAddress }: OrderBookLis
   const filteredOrders = useMemo(() => {
     return orders
       .filter((o) => {
+        const notExpired = !o.expiresAt || new Date(o.expiresAt).getTime() > Date.now();
         const matchesSearch =
           o.pair.toLowerCase().includes(search.toLowerCase()) ||
           o.maker.toLowerCase().includes(search.toLowerCase());
         const matchesSide = sideFilter === "all" || o.side === sideFilter;
-        return matchesSearch && matchesSide && o.status === OrderStatus.OPEN;
+        return matchesSearch && matchesSide && o.status === OrderStatus.OPEN && notExpired;
       })
       .sort((a, b) => {
         if (!sortConfig) return 0;

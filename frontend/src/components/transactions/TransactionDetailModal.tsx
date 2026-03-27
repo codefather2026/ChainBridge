@@ -16,24 +16,18 @@ import {
 } from "lucide-react";
 import { Button, Badge, Card } from "@/components/ui";
 import { clsx } from "clsx";
+import { getExplorerUrl } from "@/lib/explorers";
+import { SigningProgressStepper } from "./SigningProgressStepper";
 
 interface TransactionDetailModalProps {
   tx: Transaction;
   onClose: () => void;
+  onRetry?: () => void;
 }
 
-export function TransactionDetailModal({ tx, onClose }: TransactionDetailModalProps) {
+export function TransactionDetailModal({ tx, onClose, onRetry }: TransactionDetailModalProps) {
   const explorerUrl = () => {
-    switch (tx.chain.toLowerCase()) {
-      case "stellar":
-        return `https://stellar.expert/explorer/testnet/tx/${tx.hash}`;
-      case "ethereum":
-        return `https://sepolia.etherscan.io/tx/${tx.hash}`;
-      case "bitcoin":
-        return `https://mempool.space/testnet/tx/${tx.hash}`;
-      default:
-        return "#";
-    }
+    return tx.explorerUrl ?? getExplorerUrl(tx.chain, tx.hash);
   };
 
   const progress =
@@ -139,6 +133,15 @@ export function TransactionDetailModal({ tx, onClose }: TransactionDetailModalPr
               </div>
             )}
           </div>
+
+          {tx.lifecycle && <SigningProgressStepper lifecycle={tx.lifecycle} onRetry={onRetry} />}
+
+          {tx.failureReason && (
+            <div className="rounded-2xl border border-red-500/20 bg-red-500/5 p-4">
+              <p className="text-sm font-semibold text-red-300">Submission error</p>
+              <p className="mt-1 text-sm text-text-secondary">{tx.failureReason}</p>
+            </div>
+          )}
         </div>
 
         {/* Footer Actions */}

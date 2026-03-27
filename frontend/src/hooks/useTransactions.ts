@@ -3,6 +3,12 @@ import { persist } from "zustand/middleware";
 import { Transaction, TransactionStore, TransactionStatus } from "@/types";
 import { useCallback } from "react";
 
+import {
+  buildCompletedLifecycle,
+  buildTransactionLifecycle,
+} from "@/lib/transactionLifecycle";
+import { getExplorerUrl } from "@/lib/explorers";
+
 export const useTransactionStore = create<TransactionStore>()(
   persist(
     (set) => ({
@@ -49,6 +55,8 @@ export const useMockTransactions = () => {
         requiredConfirmations: 1,
         timestamp: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
         proofVerified: true,
+        explorerUrl: getExplorerUrl("stellar", "GC...3X4"),
+        lifecycle: buildCompletedLifecycle("Stellar"),
       },
       {
         id: "tx_002",
@@ -62,6 +70,8 @@ export const useMockTransactions = () => {
         requiredConfirmations: 12,
         timestamp: new Date(Date.now() - 1000 * 60 * 2).toISOString(),
         proofVerified: false,
+        explorerUrl: getExplorerUrl("ethereum", "0x7a...f21"),
+        lifecycle: buildTransactionLifecycle("Ethereum", "confirm"),
       },
       {
         id: "tx_003",
@@ -70,10 +80,17 @@ export const useMockTransactions = () => {
         type: "inbound",
         amount: "0.0024",
         token: "BTC",
-        status: TransactionStatus.PENDING,
+        status: TransactionStatus.FAILED,
         confirmations: 0,
         requiredConfirmations: 3,
         timestamp: new Date().toISOString(),
+        explorerUrl: getExplorerUrl("bitcoin", "bc1...qwe"),
+        lifecycle: buildTransactionLifecycle("Bitcoin", "approval", {
+          failedStep: "broadcast",
+          errorMessage: "Bitcoin broadcast failed: mempool rejected the transaction fee rate.",
+          retryable: true,
+        }),
+        failureReason: "Bitcoin broadcast failed: mempool rejected the transaction fee rate.",
       },
     ];
 

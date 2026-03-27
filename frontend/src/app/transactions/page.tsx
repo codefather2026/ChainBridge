@@ -7,6 +7,11 @@ import { Transaction, TransactionStatus } from "@/types";
 import { Activity, ShieldCheck, Zap } from "lucide-react";
 
 import { Badge } from "@/components/ui";
+import {
+  buildCompletedLifecycle,
+  buildTransactionLifecycle,
+} from "@/lib/transactionLifecycle";
+import { getExplorerUrl } from "@/lib/explorers";
 
 export default function TransactionsPage() {
   const transactions = useTransactionStore((state) => state.transactions);
@@ -28,6 +33,8 @@ export default function TransactionsPage() {
           requiredConfirmations: 1,
           timestamp: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
           proofVerified: true,
+          explorerUrl: getExplorerUrl("stellar", "GC...3X4"),
+          lifecycle: buildCompletedLifecycle("Stellar"),
         },
         {
           id: "tx_002",
@@ -41,6 +48,8 @@ export default function TransactionsPage() {
           requiredConfirmations: 12,
           timestamp: new Date(Date.now() - 1000 * 60 * 2).toISOString(),
           proofVerified: false,
+          explorerUrl: getExplorerUrl("ethereum", "0x7a...f21"),
+          lifecycle: buildTransactionLifecycle("Ethereum", "confirm"),
         },
         {
           id: "tx_003",
@@ -49,10 +58,17 @@ export default function TransactionsPage() {
           type: "inbound",
           amount: "0.0024",
           token: "BTC",
-          status: TransactionStatus.PENDING,
+          status: TransactionStatus.FAILED,
           confirmations: 0,
           requiredConfirmations: 3,
           timestamp: new Date().toISOString(),
+          explorerUrl: getExplorerUrl("bitcoin", "bc1...qwe"),
+          lifecycle: buildTransactionLifecycle("Bitcoin", "approval", {
+            failedStep: "broadcast",
+            errorMessage: "Bitcoin broadcast failed: mempool rejected the transaction fee rate.",
+            retryable: true,
+          }),
+          failureReason: "Bitcoin broadcast failed: mempool rejected the transaction fee rate.",
         },
       ];
       mocks.forEach((t) => addTransaction(t));

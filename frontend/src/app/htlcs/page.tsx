@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Activity,
   ArrowRightLeft,
   Clock3,
+  ExternalLink,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -14,6 +15,15 @@ import {
 import { Button, Card, Input, ToastContainer } from "@/components/ui";
 import { claimHTLC, fetchHTLCs, HTLCRecord, refundHTLC } from "@/lib/htlcApi";
 import { cn } from "@/lib/utils";
+import { SigningProgressStepper } from "@/components/transactions/SigningProgressStepper";
+import { useTransactionStore } from "@/hooks/useTransactions";
+import { TransactionStatus } from "@/types";
+import {
+  buildCompletedLifecycle,
+  buildTransactionLifecycle,
+  sleep,
+} from "@/lib/transactionLifecycle";
+import { getExplorerUrl } from "@/lib/explorers";
 
 type ToastMessage = {
   id: string;
@@ -23,6 +33,18 @@ type ToastMessage = {
 };
 
 const STATUS_OPTIONS = ["all", "active", "claimed", "refunded"];
+
+function validateSecret(secret: string) {
+  const trimmed = secret.trim();
+  if (!trimmed) return "A preimage secret is required.";
+  if (!/^[0-9a-fA-F]+$/.test(trimmed)) {
+    return "Secret must be hex-encoded.";
+  }
+  if (trimmed.length !== 64) {
+    return "Secret must be 32 bytes represented as 64 hex characters.";
+  }
+  return null;
+}
 
 function formatRemaining(seconds: number) {
   if (seconds <= 0) return "Expired";
@@ -50,8 +72,14 @@ export default function HTLCStatusPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [secret, setSecret] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [claimError, setClaimError] = useState<string | null>(null);
+  const [claimTxId, setClaimTxId] = useState<string | null>(null);
+  const [claimExplorerUrl, setClaimExplorerUrl] = useState<string | null>(null);
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const transactions = useTransactionStore((state) => state.transactions);
+  const addTransaction = useTransactionStore((state) => state.addTransaction);
+  const updateTransaction = useTransactionStore((state) => state.updateTransaction);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -60,35 +88,46 @@ export default function HTLCStatusPage() {
     return () => window.clearInterval(interval);
   }, []);
 
-  async function loadHTLCs(showSpinner = true) {
-    if (showSpinner) setLoading(true);
-    setRefreshing(!showSpinner);
-    setError(null);
-    try {
-      const data = await fetchHTLCs({
-        participant: participant.trim() || undefined,
-        hash_lock: hashLock.trim() || undefined,
-        status: status === "all" ? undefined : status,
-      });
-      setHtlcs(data);
-      if (!selectedId && data[0]) {
-        setSelectedId(data[0].id);
-      } else if (selectedId && !data.some((item) => item.id === selectedId)) {
-        setSelectedId(data[0]?.id ?? null);
+  const loadHTLCs = useCallback(
+    async (showSpinner = true) => {
+      if (showSpinner) setLoading(true);
+      setRefreshing(!showSpinner);
+      setError(null);
+      try {
+        const data = await fetchHTLCs({
+          participant: participant.trim() || undefined,
+          hash_lock: hashLock.trim() || undefined,
+          status: status === "all" ? undefined : status,
+        });
+        setHtlcs(data);
+        if (!selectedId && data[0]) {
+          setSelectedId(data[0].id);
+        } else if (selectedId && !data.some((item) => item.id === selectedId)) {
+          setSelectedId(data[0]?.id ?? null);
+        }
+      } catch (loadError: any) {
+        setError(loadError?.response?.data?.detail ?? "Failed to load HTLCs");
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
       }
-    } catch (loadError: any) {
-      setError(loadError?.response?.data?.detail ?? "Failed to load HTLCs");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }
+    },
+    [hashLock, participant, selectedId, status]
+  );
 
   useEffect(() => {
     void loadHTLCs();
-  }, [status]);
+  }, [loadHTLCs]);
+
+  useEffect(() => {
+    setClaimError(null);
+    setClaimTxId(null);
+    setClaimExplorerUrl(null);
+  }, [selectedId]);
 
   const selected = htlcs.find((item) => item.id === selectedId) ?? htlcs[0] ?? null;
+  const secretError = validateSecret(secret);
+  const claimTx = transactions.find((transaction) => transaction.id === claimTxId) ?? null;
 
   const enriched = htlcs.map((item) => {
     const secondsRemaining = Math.max(item.time_lock - now, 0);
@@ -108,10 +147,79 @@ export default function HTLCStatusPage() {
   }
 
   async function handleClaim() {
-    if (!selected || !secret.trim()) return;
+    if (!selected || secretError) return;
+    const txId = `htlc-claim-${selected.id}`;
+    const fallbackHash = selected.onchain_id ?? `claim-${Date.now().toString(16)}`;
+    const explorerUrl = selected.onchain_id
+      ? getExplorerUrl("stellar", selected.onchain_id)
+      : "/transactions";
+
     setActionLoading(true);
+    setClaimError(null);
+    setClaimTxId(txId);
+    setClaimExplorerUrl(explorerUrl);
+
+    const basePayload = {
+      hash: selected.onchain_id ?? "pending",
+      chain: "Stellar",
+      type: "swap_redeem" as const,
+      amount: String(selected.amount),
+      token: "XLM",
+      status: TransactionStatus.PENDING,
+      confirmations: 0,
+      requiredConfirmations: 1,
+      timestamp: new Date().toISOString(),
+      explorerUrl: selected.onchain_id ? getExplorerUrl("stellar", selected.onchain_id) : undefined,
+      lifecycle: buildTransactionLifecycle("Stellar", "approval"),
+      failureReason: undefined,
+    };
+
+    if (transactions.some((transaction) => transaction.id === txId)) {
+      updateTransaction(txId, basePayload);
+    } else {
+      addTransaction({
+        id: txId,
+        ...basePayload,
+      });
+    }
+
     try {
-      await claimHTLC(selected.id, secret.trim());
+      await sleep(500);
+      updateTransaction(txId, {
+        lifecycle: buildTransactionLifecycle("Stellar", "sign"),
+      });
+
+      await sleep(700);
+      updateTransaction(txId, {
+        hash: fallbackHash,
+        status: TransactionStatus.CONFIRMING,
+        lifecycle: buildTransactionLifecycle("Stellar", "broadcast"),
+      });
+
+      const claimed = await claimHTLC(selected.id, secret.trim());
+
+      await sleep(800);
+      updateTransaction(txId, {
+        hash: claimed.onchain_id ?? fallbackHash,
+        status: TransactionStatus.CONFIRMING,
+        lifecycle: buildTransactionLifecycle("Stellar", "confirm"),
+      });
+
+      await sleep(1000);
+      updateTransaction(txId, {
+        hash: claimed.onchain_id ?? fallbackHash,
+        status: TransactionStatus.COMPLETED,
+        confirmations: 1,
+        proofVerified: true,
+        explorerUrl: claimed.onchain_id
+          ? getExplorerUrl("stellar", claimed.onchain_id)
+          : undefined,
+        lifecycle: buildCompletedLifecycle("Stellar"),
+      });
+
+      if (claimed.onchain_id) {
+        setClaimExplorerUrl(getExplorerUrl("stellar", claimed.onchain_id));
+      }
       pushToast({
         type: "success",
         title: "HTLC claimed",
@@ -120,12 +228,23 @@ export default function HTLCStatusPage() {
       setSecret("");
       await loadHTLCs(false);
     } catch (claimError: any) {
+      const message =
+        claimError?.response?.data?.detail ??
+        "Set NEXT_PUBLIC_CHAINBRIDGE_API_KEY to enable claim actions.";
+      setClaimError(message);
+      updateTransaction(txId, {
+        status: TransactionStatus.FAILED,
+        failureReason: message,
+        lifecycle: buildTransactionLifecycle("Stellar", "broadcast", {
+          failedStep: "broadcast",
+          errorMessage: `Stellar broadcast failed: ${message}`,
+          retryable: true,
+        }),
+      });
       pushToast({
         type: "error",
         title: "Claim failed",
-        message:
-          claimError?.response?.data?.detail ??
-          "Set NEXT_PUBLIC_CHAINBRIDGE_API_KEY to enable claim actions.",
+        message,
       });
     } finally {
       setActionLoading(false);
@@ -397,13 +516,38 @@ export default function HTLCStatusPage() {
                     value={secret}
                     onChange={(event) => setSecret(event.target.value)}
                     placeholder="Required for claim"
+                    error={selected.can_claim ? secretError ?? undefined : undefined}
+                    hint="Enter the 32-byte preimage as a 64-character hex string."
                     disabled={!selected.can_claim}
                   />
+                  {claimTx?.lifecycle && (
+                    <SigningProgressStepper
+                      lifecycle={claimTx.lifecycle}
+                      onRetry={claimTx.lifecycle.retryable ? () => void handleClaim() : undefined}
+                      retryLabel="Retry claim"
+                    />
+                  )}
+                  {claimError && (
+                    <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-3 text-sm text-red-300">
+                      {claimError}
+                    </div>
+                  )}
+                  {claimTx?.status === TransactionStatus.COMPLETED && claimExplorerUrl && (
+                    <a
+                      href={claimExplorerUrl}
+                      target={claimExplorerUrl.startsWith("/") ? undefined : "_blank"}
+                      rel={claimExplorerUrl.startsWith("/") ? undefined : "noopener noreferrer"}
+                      className="inline-flex items-center gap-2 text-sm text-text-primary underline underline-offset-4"
+                    >
+                      View claim result in explorer
+                      <ExternalLink className="h-4 w-4" />
+                    </a>
+                  )}
                   <div className="flex flex-col gap-3 sm:flex-row">
                     <Button
                       className="flex-1"
                       onClick={() => void handleClaim()}
-                      disabled={!selected.can_claim || secret.trim().length === 0}
+                      disabled={!selected.can_claim || Boolean(secretError)}
                       loading={actionLoading}
                     >
                       Claim HTLC

@@ -18,7 +18,12 @@ import {
 import { Input, Button, Badge, Spinner } from "@/components/ui";
 import { TransactionRow } from "./TransactionRow";
 import { TransactionDetailModal } from "./TransactionDetailModal";
-import { clsx } from "clsx";
+import { useTransactionStore } from "@/hooks/useTransactions";
+import {
+  buildCompletedLifecycle,
+  buildTransactionLifecycle,
+  sleep,
+} from "@/lib/transactionLifecycle";
 
 interface TransactionFeedProps {
   transactions: Transaction[];
@@ -30,11 +35,15 @@ export function TransactionFeed({ transactions, isLoading }: TransactionFeedProp
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<TransactionStatus | "all">("all");
   const [chainFilter, setChainFilter] = useState<string | "all">("all");
-  const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const updateTransaction = useTransactionStore((state) => state.updateTransaction);
 
   useEffect(() => {
     setIsHydrated(true);
   }, []);
+
+  const selectedTx =
+    transactions.find((transaction) => transaction.id === selectedId) ?? null;
 
   const filteredTransactions = useMemo(() => {
     if (!transactions) return [];
@@ -54,11 +63,44 @@ export function TransactionFeed({ transactions, isLoading }: TransactionFeedProp
       return matchesSearch && matchesStatus && matchesChain;
     });
 
-    console.log(
-      `[TransactionFeed] Filtered: ${result.length}/${transactions.length} (Search: "${search}", Status: ${statusFilter}, Chain: ${chainFilter})`
-    );
     return result;
   }, [transactions, search, statusFilter, chainFilter]);
+
+  async function retryTransaction(tx: Transaction) {
+    updateTransaction(tx.id, {
+      status: TransactionStatus.PENDING,
+      confirmations: 0,
+      failureReason: undefined,
+      lifecycle: buildTransactionLifecycle(tx.chain, "approval"),
+    });
+    await sleep(600);
+
+    updateTransaction(tx.id, {
+      lifecycle: buildTransactionLifecycle(tx.chain, "sign"),
+    });
+    await sleep(700);
+
+    updateTransaction(tx.id, {
+      status: TransactionStatus.CONFIRMING,
+      lifecycle: buildTransactionLifecycle(tx.chain, "broadcast"),
+      hash: tx.hash.startsWith("retry-") ? tx.hash : `retry-${Date.now().toString(16)}`,
+    });
+    await sleep(900);
+
+    updateTransaction(tx.id, {
+      status: TransactionStatus.CONFIRMING,
+      confirmations: Math.max(1, tx.requiredConfirmations - 1),
+      lifecycle: buildTransactionLifecycle(tx.chain, "confirm"),
+    });
+    await sleep(1000);
+
+    updateTransaction(tx.id, {
+      status: TransactionStatus.COMPLETED,
+      confirmations: tx.requiredConfirmations,
+      proofVerified: true,
+      lifecycle: buildCompletedLifecycle(tx.chain),
+    });
+  }
 
   if (!isHydrated) {
     return (
@@ -179,7 +221,7 @@ export function TransactionFeed({ transactions, isLoading }: TransactionFeedProp
               </thead>
               <tbody className="divide-y divide-border/50">
                 {filteredTransactions.map((tx) => (
-                  <TransactionRow key={tx.id} tx={tx} onSelect={() => setSelectedTx(tx)} />
+                  <TransactionRow key={tx.id} tx={tx} onSelect={() => setSelectedId(tx.id)} />
                 ))}
               </tbody>
             </table>
@@ -210,7 +252,15 @@ export function TransactionFeed({ transactions, isLoading }: TransactionFeedProp
         )}
       </div>
 
-      {selectedTx && <TransactionDetailModal tx={selectedTx} onClose={() => setSelectedTx(null)} />}
+      {selectedTx && (
+        <TransactionDetailModal
+          tx={selectedTx}
+          onClose={() => setSelectedId(null)}
+          onRetry={
+            selectedTx.lifecycle?.retryable ? () => void retryTransaction(selectedTx) : undefined
+          }
+        />
+      )}
 
       <div className="flex flex-col gap-4 rounded-xl bg-brand-500/5 border border-brand-500/10 p-4 md:flex-row md:items-center md:gap-8">
         <div className="flex items-center gap-3">
