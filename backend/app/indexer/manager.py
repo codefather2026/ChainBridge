@@ -9,6 +9,7 @@ import asyncio
 import logging
 
 from app.config.redis import CacheService, get_redis
+from app.observability.metrics import update_indexer_metrics
 
 from .base import BaseIndexer, IndexerStatus
 from .stellar_indexer import StellarIndexer
@@ -123,6 +124,7 @@ class IndexerManager:
         cache = CacheService(get_redis())
         while True:
             statuses = self.get_all_status()
+            update_indexer_metrics(statuses)
             for chain, status in statuses.items():
                 status["last_updated"] = status["last_sync_at"]
                 await cache.set(f"indexer:status:{chain}", status, ttl=60)

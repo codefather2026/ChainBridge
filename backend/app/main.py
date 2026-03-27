@@ -1,19 +1,20 @@
 from contextlib import asynccontextmanager
-
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-import os
 import logging
+import os
+
+from fastapi import FastAPI, Response
+from fastapi.middleware.cors import CORSMiddleware
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.config.redis import close_redis, get_redis, init_redis
 from app.indexer import IndexerManager
+from app.middleware.metrics import MetricsMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
+from app.observability.metrics import update_indexer_metrics
 from app.routes import api_router
-from app.stellar import StellarClient, StellarConfig
-
-
-from app.ws.manager import ConnectionManager
 from app.routes.ws import router as ws_router
+from app.stellar import StellarClient, StellarConfig
+from app.ws.manager import ConnectionManager
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,7 @@ app.add_middleware(
 )
 
 app.add_middleware(RateLimitMiddleware)
+app.add_middleware(MetricsMiddleware)
 
 app.include_router(api_router)
 app.include_router(ws_router, prefix="/api/v1", tags=["WebSocket"])
@@ -76,6 +78,13 @@ async def health_check():
         "status": "healthy",
         "stellar": stellar_health,
     }
+
+
+@app.get("/metrics", include_in_schema=False)
+async def metrics():
+    if app.state.indexer_manager:
+        update_indexer_metrics(app.state.indexer_manager.get_all_status())
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/stellar/latest-ledger")

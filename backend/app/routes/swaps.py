@@ -1,6 +1,7 @@
 """Swap status, history, and proof verification endpoints (#26, #59)."""
 
 import os
+from datetime import datetime, timezone
 
 from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -9,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.database import get_db
 from app.config.redis import get_redis, CacheService
+from app.observability.metrics import observe_swap_completion
 from app.models.swap import CrossChainSwap
 from app.schemas.swap import SwapResponse, SwapProof
 from app.middleware.auth import require_api_key
@@ -84,6 +86,12 @@ async def verify_proof(
 
     swap.other_chain_tx = proof.tx_hash
     swap.state = "executed"
+    if swap.created_at:
+        created_at = swap.created_at
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        completion_seconds = (datetime.now(timezone.utc) - created_at).total_seconds()
+        observe_swap_completion(proof.chain.lower(), swap.state, completion_seconds)
     await db.commit()
 
     redis = get_redis()

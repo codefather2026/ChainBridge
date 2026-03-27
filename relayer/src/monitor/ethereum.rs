@@ -4,31 +4,29 @@
 /// locks and claims, and generates Merkle proofs for submission
 /// to the Stellar contract.
 use crate::config::RelayerConfig;
+use crate::metrics::RelayerMetrics;
 use std::time::Duration;
 use tokio::time::sleep;
 
-pub async fn monitor_loop(config: RelayerConfig) {
-    println!(
-        "[Ethereum] Starting monitor — RPC: {}",
-        config.ethereum_rpc_url
-    );
+pub async fn monitor_loop(config: RelayerConfig, metrics: RelayerMetrics) {
+    println!("[Ethereum] Starting monitor - RPC: {}", config.ethereum_rpc_url);
+    metrics.mark_started("ethereum");
 
     let interval = Duration::from_secs(config.poll_interval_secs);
     let mut last_block: u64 = 0;
 
     loop {
         match poll_logs(&config, last_block).await {
-            Ok(new_block) => {
+            Ok((new_block, detected_events)) => {
                 if new_block > last_block {
-                    println!(
-                        "[Ethereum] Processed blocks {} -> {}",
-                        last_block, new_block
-                    );
+                    println!("[Ethereum] Processed blocks {} -> {}", last_block, new_block);
                     last_block = new_block;
                 }
+                metrics.mark_poll_success("ethereum", new_block, detected_events as u64);
             }
             Err(e) => {
                 eprintln!("[Ethereum] Poll error: {}. Retrying...", e);
+                metrics.mark_poll_error("ethereum");
             }
         }
         sleep(interval).await;
@@ -38,7 +36,7 @@ pub async fn monitor_loop(config: RelayerConfig) {
 async fn poll_logs(
     config: &RelayerConfig,
     from_block: u64,
-) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(u64, usize), Box<dyn std::error::Error + Send + Sync>> {
     let client = reqwest::Client::new();
 
     // Get latest block number
@@ -59,7 +57,7 @@ async fn poll_logs(
     let current_block = u64::from_str_radix(hex_block.trim_start_matches("0x"), 16).unwrap_or(0);
 
     if current_block <= from_block {
-        return Ok(from_block);
+        return Ok((from_block, 0));
     }
 
     // Get logs for HTLC contract events
@@ -88,15 +86,12 @@ async fn poll_logs(
         let topics = log["topics"].as_array();
         if let Some(topics) = topics {
             let event_sig = topics.first().and_then(|t| t.as_str()).unwrap_or("");
-            println!(
-                "[Ethereum] Log detected: {}",
-                &event_sig[..10.min(event_sig.len())]
-            );
+            println!("[Ethereum] Log detected: {}", &event_sig[..10.min(event_sig.len())]);
 
             // TODO: Decode event data, generate Merkle proof,
             // submit to Stellar ChainBridge contract via verify_proof()
         }
     }
 
-    Ok(current_block)
+    Ok((current_block, logs.len()))
 }
