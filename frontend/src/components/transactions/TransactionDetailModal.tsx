@@ -7,7 +7,6 @@ import {
   ShieldCheck,
   Clock,
   CheckCircle2,
-  AlertCircle,
   Hash,
   Globe,
   Zap,
@@ -18,6 +17,10 @@ import { Button, Badge, Card } from "@/components/ui";
 import { clsx } from "clsx";
 import { getExplorerUrl } from "@/lib/explorers";
 import { SigningProgressStepper } from "./SigningProgressStepper";
+import {
+  ActivityTimeline,
+  type ActivityTimelineEvent,
+} from "@/components/timeline/ActivityTimeline";
 
 interface TransactionDetailModalProps {
   tx: Transaction;
@@ -29,6 +32,48 @@ export function TransactionDetailModal({ tx, onClose, onRetry }: TransactionDeta
   const explorerUrl = () => {
     return tx.explorerUrl ?? getExplorerUrl(tx.chain, tx.hash);
   };
+
+  const timelineEvents: ActivityTimelineEvent[] = tx.lifecycle
+    ? tx.lifecycle.steps.map((step) => {
+        const status =
+          step.status === "completed"
+            ? "confirmed"
+            : step.status === "error"
+              ? "failed"
+              : "pending";
+
+        return {
+          id: `${tx.id}-${step.key}`,
+          label: step.label,
+          timestamp:
+            step.status === "completed" ||
+            (step.key === tx.lifecycle?.currentStep && step.status !== "idle")
+              ? tx.timestamp
+              : null,
+          chain: tx.chain,
+          status,
+          txHash: tx.hash !== "pending" ? tx.hash : undefined,
+          href: tx.hash !== "pending" ? explorerUrl() : undefined,
+          description: step.errorMessage ?? step.description,
+        } satisfies ActivityTimelineEvent;
+      })
+    : [
+        {
+          id: tx.id,
+          label: tx.type.replace("_", " "),
+          timestamp: tx.timestamp,
+          chain: tx.chain,
+          status:
+            tx.status === TransactionStatus.COMPLETED
+              ? "confirmed"
+              : tx.status === TransactionStatus.FAILED
+                ? "failed"
+                : "pending",
+          txHash: tx.hash !== "pending" ? tx.hash : undefined,
+          href: tx.hash !== "pending" ? explorerUrl() : undefined,
+          description: tx.failureReason,
+        },
+      ];
 
   const progress =
     tx.status === TransactionStatus.COMPLETED
@@ -135,6 +180,12 @@ export function TransactionDetailModal({ tx, onClose, onRetry }: TransactionDeta
           </div>
 
           {tx.lifecycle && <SigningProgressStepper lifecycle={tx.lifecycle} onRetry={onRetry} />}
+
+          <ActivityTimeline
+            title="Swap Activity"
+            events={timelineEvents}
+            emptyMessage="No activity has been recorded for this swap yet."
+          />
 
           {tx.failureReason && (
             <div className="rounded-2xl border border-red-500/20 bg-red-500/5 p-4">

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Activity,
   ArrowRightLeft,
-  Clock3,
+  AlertTriangle,
   ExternalLink,
   RefreshCw,
   Search,
@@ -12,7 +12,7 @@ import {
   TimerReset,
 } from "lucide-react";
 
-import { Button, Card, Input, ToastContainer } from "@/components/ui";
+import { Button, Card, Input, Modal, ToastContainer } from "@/components/ui";
 import { claimHTLC, fetchHTLCs, HTLCRecord, refundHTLC } from "@/lib/htlcApi";
 import { cn } from "@/lib/utils";
 import { SigningProgressStepper } from "@/components/transactions/SigningProgressStepper";
@@ -24,6 +24,11 @@ import {
   sleep,
 } from "@/lib/transactionLifecycle";
 import { getExplorerUrl } from "@/lib/explorers";
+import { CountdownTimer } from "@/components/htlc/CountdownTimer";
+import {
+  ActivityTimeline,
+  type ActivityTimelineEvent,
+} from "@/components/timeline/ActivityTimeline";
 
 type ToastMessage = {
   id: string;
@@ -75,6 +80,7 @@ export default function HTLCStatusPage() {
   const [claimError, setClaimError] = useState<string | null>(null);
   const [claimTxId, setClaimTxId] = useState<string | null>(null);
   const [claimExplorerUrl, setClaimExplorerUrl] = useState<string | null>(null);
+  const [refundTarget, setRefundTarget] = useState<HTLCRecord | null>(null);
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const transactions = useTransactionStore((state) => state.transactions);
@@ -128,6 +134,17 @@ export default function HTLCStatusPage() {
   const selected = htlcs.find((item) => item.id === selectedId) ?? htlcs[0] ?? null;
   const secretError = validateSecret(secret);
   const claimTx = transactions.find((transaction) => transaction.id === claimTxId) ?? null;
+  const selectedTimelineEvents: ActivityTimelineEvent[] = selected
+    ? selected.timeline.map((event) => ({
+        id: `${selected.id}-${event.label}`,
+        label: event.label,
+        timestamp: event.timestamp,
+        chain: "Stellar",
+        status: event.completed ? "confirmed" : "pending",
+        txHash: selected.onchain_id ?? undefined,
+        href: selected.onchain_id ? getExplorerUrl("stellar", selected.onchain_id) : undefined,
+      }))
+    : [];
 
   const enriched = htlcs.map((item) => {
     const secondsRemaining = Math.max(item.time_lock - now, 0);
@@ -252,15 +269,31 @@ export default function HTLCStatusPage() {
   }
 
   async function handleRefund() {
-    if (!selected) return;
+    if (!refundTarget) return;
     setActionLoading(true);
     try {
-      await refundHTLC(selected.id);
+      const refunded = await refundHTLC(refundTarget.id);
+      setHtlcs((current) =>
+        current.map((item) =>
+          item.id === refundTarget.id
+            ? {
+                ...item,
+                ...refunded,
+                status: "refunded",
+                can_claim: false,
+                can_refund: false,
+                phase: "refunded",
+                seconds_remaining: 0,
+              }
+            : item
+        )
+      );
       pushToast({
         type: "success",
         title: "Refund submitted",
-        message: `Refund queued for ${selected.id}.`,
+        message: `Refund queued for ${refundTarget.id}.`,
       });
+      setRefundTarget(null);
       await loadHTLCs(false);
     } catch (refundError: any) {
       pushToast({
@@ -418,18 +451,11 @@ export default function HTLCStatusPage() {
                     </div>
 
                     <div className="min-w-[140px] text-left md:text-right">
-                      <div
-                        className={cn(
-                          "text-sm font-bold",
-                          item.urgency === "critical"
-                            ? "text-red-400"
-                            : item.urgency === "warning"
-                              ? "text-amber-400"
-                              : "text-emerald-400"
-                        )}
-                      >
-                        {formatRemaining(item.secondsRemaining)}
-                      </div>
+                      <CountdownTimer
+                        targetTimestamp={item.time_lock}
+                        compact
+                        className="border-none bg-transparent px-0 py-0 md:ml-auto"
+                      />
                       <p className="mt-1 text-xs text-text-muted">until refund window</p>
                     </div>
                   </div>
@@ -456,10 +482,7 @@ export default function HTLCStatusPage() {
                       {selected.id}
                     </h2>
                   </div>
-                  <div className="flex items-center gap-2 text-sm font-semibold text-text-primary">
-                    <Clock3 className="h-4 w-4 text-brand-500" />
-                    {formatRemaining(Math.max(selected.time_lock - now, 0))}
-                  </div>
+                  <CountdownTimer targetTimestamp={selected.time_lock} />
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -474,38 +497,11 @@ export default function HTLCStatusPage() {
                   />
                 </div>
 
-                <div className="space-y-3">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-text-muted">
-                      Timeline
-                    </p>
-                  </div>
-                  <div className="space-y-3">
-                    {selected.timeline.map((event) => (
-                      <div key={event.label} className="flex gap-3">
-                        <div className="flex flex-col items-center">
-                          <span
-                            className={cn(
-                              "mt-1 h-3 w-3 rounded-full border",
-                              event.completed
-                                ? "border-brand-500 bg-brand-500"
-                                : "border-border bg-surface"
-                            )}
-                          />
-                          <span className="mt-1 h-full w-px bg-border" />
-                        </div>
-                        <div className="pb-3">
-                          <p className="text-sm font-semibold text-text-primary">{event.label}</p>
-                          <p className="text-xs text-text-secondary">
-                            {event.timestamp
-                              ? new Date(event.timestamp).toLocaleString()
-                              : "Pending"}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <ActivityTimeline
+                  title="HTLC Activity"
+                  events={selectedTimelineEvents}
+                  emptyMessage="No HTLC lifecycle events yet."
+                />
 
                 <div className="space-y-3 rounded-2xl border border-border bg-surface-raised p-4">
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-text-muted">
@@ -555,7 +551,7 @@ export default function HTLCStatusPage() {
                     <Button
                       className="flex-1"
                       variant="outline"
-                      onClick={() => void handleRefund()}
+                      onClick={() => setRefundTarget(selected)}
                       disabled={!selected.can_refund}
                       loading={actionLoading}
                     >
@@ -579,6 +575,58 @@ export default function HTLCStatusPage() {
           setToasts((current) => current.filter((toast) => toast.id !== id));
         }}
       />
+
+      <Modal
+        open={Boolean(refundTarget)}
+        onClose={() => !actionLoading && setRefundTarget(null)}
+        title="Confirm HTLC Refund"
+        description="Submitting a refund settles the expired lock on Stellar."
+      >
+        {refundTarget && (
+          <div className="space-y-4">
+            <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-text-secondary">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
+                <div>
+                  <p className="font-semibold text-text-primary">Finality warning</p>
+                  <p className="mt-1">
+                    Once the refund transaction confirms, this HTLC will be marked refunded and can
+                    no longer be claimed from the dashboard.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Detail label="HTLC" value={refundTarget.id} />
+              <Detail label="Amount" value={refundTarget.amount.toLocaleString()} />
+              <Detail label="Sender" value={refundTarget.sender} />
+              <Detail
+                label="Expired At"
+                value={new Date(refundTarget.time_lock * 1000).toLocaleString()}
+              />
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="ghost"
+                onClick={() => setRefundTarget(null)}
+                disabled={actionLoading}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => void handleRefund()}
+                disabled={!refundTarget.can_refund}
+                loading={actionLoading}
+              >
+                Confirm Refund
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
