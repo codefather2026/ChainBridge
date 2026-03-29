@@ -4,6 +4,7 @@ import { ThemeProvider } from "next-themes";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { RealTimeManager } from "@/components/RealTimeManager";
+import { SettingsEffects } from "@/components/SettingsEffects";
 import { ToastProvider } from "@/components/ui/ToastProvider";
 
 export function Providers({ children }: { children: React.ReactNode }) {
@@ -15,6 +16,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         enableSystem
         disableTransitionOnChange={false}
       >
+        <SettingsEffects />
         <RealTimeManager />
         <ToastProvider />
         {children}

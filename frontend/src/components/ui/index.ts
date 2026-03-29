@@ -8,3 +8,4 @@ export { Toast, ToastContainer } from "./toast";
 export type { ToastType } from "./toast";
 export { ToastProvider } from "./ToastProvider";
 export { CopyButton } from "./CopyButton";
+export { EmptyState } from "./empty-state";

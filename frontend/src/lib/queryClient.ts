@@ -31,6 +31,11 @@ export const queryKeys = {
     detail: (id: string) => ["orders", "detail", id] as const,
     book: (pair: string) => ["orders", "book", pair] as const,
   },
+  htlcs: {
+    all: ["htlcs"] as const,
+    list: (filters?: Record<string, unknown>) => ["htlcs", "list", filters] as const,
+    detail: (id: string) => ["htlcs", "detail", id] as const,
+  },
   dashboard: {
     health: ["dashboard", "health"] as const,
     stats: ["dashboard", "stats"] as const,

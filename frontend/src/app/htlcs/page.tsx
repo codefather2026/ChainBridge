@@ -12,7 +12,7 @@ import {
   TimerReset,
 } from "lucide-react";
 
-import { Button, Card, Input, Modal, ToastContainer } from "@/components/ui";
+import { Button, Card, EmptyState, Input, Modal, ToastContainer } from "@/components/ui";
 import { claimHTLC, fetchHTLCs, HTLCRecord, refundHTLC } from "@/lib/htlcApi";
 import { cn } from "@/lib/utils";
 import { SigningProgressStepper } from "@/components/transactions/SigningProgressStepper";
@@ -438,9 +438,28 @@ export default function HTLCStatusPage() {
                 Loading HTLC status…
               </Card>
             ) : visibleHtlcs.length === 0 ? (
-              <Card variant="raised" className="p-10 text-center text-text-secondary">
-                No HTLCs match the current filters.
-              </Card>
+              <EmptyState
+                icon={<Activity className="h-7 w-7" />}
+                title={htlcs.length === 0 ? "No HTLC activity yet" : "No matching HTLCs"}
+                description={
+                  htlcs.length === 0
+                    ? "No HTLCs are available for the current participant and network context."
+                    : "Adjust filters or clear them to view all tracked HTLC locks."
+                }
+                action={
+                  htlcs.length === 0
+                    ? { label: "Open Swap", href: "/swap" }
+                    : {
+                        label: "Clear Filters",
+                        variant: "secondary",
+                        onClick: () => {
+                          setParticipant("");
+                          setHashLock("");
+                          setStatus("all");
+                        },
+                      }
+                }
+              />
             ) : (
               visibleHtlcs.map((item) => (
                 <button
@@ -482,8 +501,12 @@ export default function HTLCStatusPage() {
         <section>
           <Card variant="glass" className="sticky top-24 overflow-hidden">
             {!selected ? (
-              <div className="p-10 text-center text-text-secondary">
-                Select an HTLC to inspect its current state.
+              <div className="p-6">
+                <EmptyState
+                  icon={<Search className="h-7 w-7" />}
+                  title="Select an HTLC"
+                  description="Choose an item from the list to inspect lock details and available claim or refund actions."
+                />
               </div>
             ) : (
               <div className="space-y-6 p-6">

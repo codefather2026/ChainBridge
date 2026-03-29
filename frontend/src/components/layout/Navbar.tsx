@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { DarkModeToggle } from "./DarkModeToggle";
 import { WalletConnect } from "../swap/WalletConnect";
+import { useSettingsStore } from "@/hooks/useSettings";
 import { Layers, Menu, X } from "lucide-react";
 
 const NAV_LINKS = [
@@ -14,6 +15,7 @@ const NAV_LINKS = [
   { name: "Market", href: "/marketplace" },
   { name: "Orders", href: "/orders" },
   { name: "HTLCs", href: "/htlcs" },
+  { name: "Settings", href: "/settings" },
   { name: "Protocol", href: "/protocol" },
   { name: "Explorer", href: "/transactions" },
   { name: "About", href: "/about" },
@@ -22,6 +24,7 @@ const NAV_LINKS = [
 
 export function Navbar() {
   const pathname = usePathname();
+  const networkMode = useSettingsStore((state) => state.settings.network.mode);
   const [isOpen, setIsOpen] = useState(false);
 
   return (
@@ -64,6 +67,10 @@ export function Navbar() {
             </div>
 
             <div className="hidden h-6 w-px bg-border md:block" />
+
+            <span className="hidden rounded-full border border-border bg-surface-raised px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-text-muted lg:inline-flex">
+              {networkMode}
+            </span>
 
             <div className="hidden md:block">
               <DarkModeToggle />

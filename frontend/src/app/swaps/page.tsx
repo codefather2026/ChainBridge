@@ -1,45 +1,18 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Card, Badge, Button, LoadingState } from "@/components/ui";
+import { useEffect, useMemo, useState } from "react";
+import { Card, Badge, Button, EmptyState, Modal, Input } from "@/components/ui";
 import { History, ExternalLink, ArrowRight, Filter } from "lucide-react";
 import { SwapStatus } from "@/types";
 import { useWalletStore } from "@/hooks/useWallet";
-import { Modal, Input } from "@/components/ui";
 import { createDispute } from "@/lib/disputesApi";
-
-const MOCK_SWAPS = [
-  {
-    id: "swap_001",
-    from: "XLM",
-    to: "BTC",
-    amount: "5,000",
-    toAmount: "0.009",
-    status: SwapStatus.COMPLETED,
-    date: "2024-03-20T10:00:00Z",
-  },
-  {
-    id: "swap_002",
-    from: "ETH",
-    to: "XLM",
-    amount: "1.2",
-    toAmount: "12,500",
-    status: SwapStatus.PENDING,
-    date: "2024-03-21T14:30:00Z",
-  },
-  {
-    id: "swap_003",
-    from: "BTC",
-    to: "ETH",
-    amount: "0.05",
-    toAmount: "1.8",
-    status: SwapStatus.EXPIRED,
-    date: "2024-03-19T08:15:00Z",
-  },
-];
+import { useMockSwaps, useSwapHistoryStore } from "@/hooks/useSwapHistory";
 
 export default function HistoryPage() {
   const { isConnected, address } = useWalletStore();
+  const swaps = useSwapHistoryStore((state) => state.swaps);
+  const { seedMockSwaps } = useMockSwaps();
+
   const [open, setOpen] = useState(false);
   const [selectedSwap, setSelectedSwap] = useState<string>("");
   const [category, setCategory] = useState("timeout");
@@ -49,10 +22,14 @@ export default function HistoryPage() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  useEffect(() => {
+    seedMockSwaps();
+  }, [seedMockSwaps]);
+
   const disputableSwaps = useMemo(
     () =>
-      MOCK_SWAPS.filter((s) => s.status === SwapStatus.PENDING || s.status === SwapStatus.EXPIRED),
-    []
+      swaps.filter((swap) => swap.status === SwapStatus.PENDING || swap.status === SwapStatus.EXPIRED),
+    [swaps]
   );
 
   const submitDispute = async () => {
@@ -99,80 +76,83 @@ export default function HistoryPage() {
       </div>
 
       {!isConnected ? (
-        <Card variant="glass" className="py-20 text-center">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-surface-overlay mb-6 border border-border text-text-muted">
-            <History className="h-8 w-8" />
-          </div>
-          <h2 className="text-xl font-bold text-text-primary">Connect your wallet</h2>
-          <p className="mt-2 text-text-secondary">
-            Please connect your wallet to view your historical swaps.
-          </p>
-        </Card>
+        <EmptyState
+          icon={<History className="h-7 w-7" />}
+          title="Connect your wallet"
+          description="Connect a wallet to load and monitor your swap history in real time."
+          action={{ label: "Open Swap", href: "/swap" }}
+        />
       ) : (
         <div className="space-y-4">
-          {statusMessage && (
-            <Card className="p-3 text-sm text-text-secondary">{statusMessage}</Card>
-          )}
-          {MOCK_SWAPS.map((swap) => (
-            <Card
-              key={swap.id}
-              hover
-              className="flex items-center justify-between p-6 overflow-hidden"
-            >
-              <div className="flex items-center gap-6">
-                <div className="flex -space-x-2">
-                  <div className="h-10 w-10 rounded-full border-2 border-background bg-surface flex items-center justify-center text-xs font-bold">
-                    {swap.from}
+          {statusMessage && <Card className="p-3 text-sm text-text-secondary">{statusMessage}</Card>}
+
+          {swaps.length === 0 ? (
+            <EmptyState
+              icon={<History className="h-7 w-7" />}
+              title="No swaps yet"
+              description="You have no historical swaps on this profile. Start with a new cross-chain swap to populate activity here."
+              action={{ label: "Start Swap", href: "/swap" }}
+            />
+          ) : (
+            swaps.map((swap) => (
+              <Card key={swap.id} hover className="flex items-center justify-between overflow-hidden p-6">
+                <div className="flex items-center gap-6">
+                  <div className="flex -space-x-2">
+                    <div className="h-10 w-10 rounded-full border-2 border-background bg-surface flex items-center justify-center text-xs font-bold">
+                      {swap.from}
+                    </div>
+                    <div className="h-10 w-10 rounded-full border-2 border-background bg-surface flex items-center justify-center text-xs font-bold">
+                      {swap.to}
+                    </div>
                   </div>
-                  <div className="h-10 w-10 rounded-full border-2 border-background bg-surface flex items-center justify-center text-xs font-bold">
-                    {swap.to}
+
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-text-primary">
+                        {swap.amount} {swap.from}
+                      </span>
+                      <ArrowRight className="h-3 w-3 text-text-muted" />
+                      <span className="font-bold text-text-primary">
+                        {swap.toAmount} {swap.to}
+                      </span>
+                    </div>
+                    <p className="text-xs text-text-muted mt-1">
+                      {new Date(swap.date).toLocaleDateString()} at{" "}
+                      {new Date(swap.date).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </p>
                   </div>
                 </div>
 
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-text-primary">
-                      {swap.amount} {swap.from}
-                    </span>
-                    <ArrowRight className="h-3 w-3 text-text-muted" />
-                    <span className="font-bold text-text-primary">
-                      {swap.toAmount} {swap.to}
-                    </span>
-                  </div>
-                  <p className="text-xs text-text-muted mt-1">
-                    {new Date(swap.date).toLocaleDateString()} at{" "}
-                    {new Date(swap.date).toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-4">
-                <Badge status={swap.status} />
-                <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                  <ExternalLink className="h-4 w-4" />
-                </Button>
-                {(swap.status === SwapStatus.PENDING || swap.status === SwapStatus.EXPIRED) && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setSelectedSwap(swap.id);
-                      setOpen(true);
-                    }}
-                  >
-                    Open Dispute
+                <div className="flex items-center gap-4">
+                  <Badge status={swap.status} />
+                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0" disabled={!swap.otherChainTx}>
+                    <ExternalLink className="h-4 w-4" />
                   </Button>
-                )}
-              </div>
-            </Card>
-          ))}
+                  {(swap.status === SwapStatus.PENDING || swap.status === SwapStatus.EXPIRED) && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setSelectedSwap(swap.id);
+                        setOpen(true);
+                      }}
+                    >
+                      Open Dispute
+                    </Button>
+                  )}
+                </div>
+              </Card>
+            ))
+          )}
 
-          <div className="pt-6 text-center">
-            <p className="text-xs text-text-muted">Showing {MOCK_SWAPS.length} recent swaps</p>
-          </div>
+          {swaps.length > 0 ? (
+            <div className="pt-6 text-center">
+              <p className="text-xs text-text-muted">Showing {swaps.length} recent swaps</p>
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -191,9 +171,9 @@ export default function HistoryPage() {
               className="rounded-xl border border-border bg-surface-raised px-3 py-2 text-sm text-text-primary"
             >
               <option value="">Select swap</option>
-              {disputableSwaps.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.id} ({s.from} to {s.to})
+              {disputableSwaps.map((swap) => (
+                <option key={swap.id} value={swap.id}>
+                  {swap.id} ({swap.from} to {swap.to})
                 </option>
               ))}
             </select>
@@ -251,7 +231,7 @@ export default function HistoryPage() {
             onClick={submitDispute}
             disabled={submitting || !selectedSwap || reason.trim().length < 10}
           >
-            {submitting ? "Submitting…" : "Submit Dispute"}
+            {submitting ? "Submitting..." : "Submit Dispute"}
           </Button>
         </div>
       </Modal>

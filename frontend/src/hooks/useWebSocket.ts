@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 interface WebSocketMessage {
   type: string;
@@ -11,19 +11,41 @@ interface SubscribeOptions {
   eventTypes?: string[];
 }
 
+interface UseWebSocketOptions {
+  enabled?: boolean;
+}
+
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
 const RECONNECT_MULTIPLIER = 2;
+const RECONNECT_JITTER_FACTOR = 0.3;
 
-export function useWebSocket(url: string | null, token: string | null) {
+export function useWebSocket(
+  url: string | null,
+  token: string | null,
+  options: UseWebSocketOptions = {}
+) {
+  const enabled = options.enabled ?? true;
+
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+
   const ws = useRef<WebSocket | null>(null);
   const reconnectTimeout = useRef<ReturnType<typeof setTimeout>>();
-  const reconnectDelay = useRef(RECONNECT_BASE_MS);
+  const reconnectAttempts = useRef(0);
+  const shouldReconnect = useRef(true);
+
   const listeners = useRef<Map<string, Set<(data: any) => void>>>(new Map());
-  // Track subscriptions so they can be re-sent after reconnect
   const subscriptions = useRef<Map<string, SubscribeOptions>>(new Map());
+
+  const canConnect = useMemo(() => Boolean(enabled && url && token), [enabled, token, url]);
+
+  const clearReconnectTimer = useCallback(() => {
+    if (reconnectTimeout.current) {
+      clearTimeout(reconnectTimeout.current);
+      reconnectTimeout.current = undefined;
+    }
+  }, []);
 
   const sendRaw = useCallback((payload: object) => {
     if (ws.current?.readyState === WebSocket.OPEN) {
@@ -41,35 +63,76 @@ export function useWebSocket(url: string | null, token: string | null) {
     });
   }, [sendRaw]);
 
-  const connect = useCallback(() => {
-    if (!url || !token) return;
-    if (ws.current?.readyState === WebSocket.CONNECTING) return;
+  const scheduleReconnect = useCallback(
+    (connectFn: () => void) => {
+      if (!canConnect || !shouldReconnect.current) return;
+
+      clearReconnectTimer();
+
+      const attempt = reconnectAttempts.current;
+      const exponentialDelay = Math.min(
+        RECONNECT_BASE_MS * RECONNECT_MULTIPLIER ** attempt,
+        RECONNECT_MAX_MS
+      );
+      const jitter = Math.floor(exponentialDelay * Math.random() * RECONNECT_JITTER_FACTOR);
+      const delay = Math.min(exponentialDelay + jitter, RECONNECT_MAX_MS);
+
+      reconnectTimeout.current = setTimeout(() => {
+        reconnectAttempts.current += 1;
+        connectFn();
+      }, delay);
+    },
+    [canConnect, clearReconnectTimer]
+  );
+
+  const disconnect = useCallback(() => {
+    clearReconnectTimer();
+    setIsConnected(false);
 
     if (ws.current) {
-      ws.current.onclose = null; // prevent re-trigger during teardown
+      ws.current.onclose = null;
+      ws.current.onerror = null;
+      ws.current.onopen = null;
+      ws.current.onmessage = null;
       ws.current.close();
+      ws.current = null;
+    }
+  }, [clearReconnectTimer]);
+
+  const connect = useCallback(() => {
+    if (!canConnect) return;
+    if (ws.current?.readyState === WebSocket.CONNECTING) return;
+
+    clearReconnectTimer();
+
+    if (ws.current) {
+      ws.current.onclose = null;
+      ws.current.close();
+      ws.current = null;
     }
 
-    const wsUrl = new URL(url);
-    wsUrl.searchParams.set("token", token);
+    let wsUrl: URL;
+    try {
+      wsUrl = new URL(url!);
+      wsUrl.searchParams.set("token", token!);
+    } catch {
+      setError(new Error("Invalid WebSocket URL"));
+      return;
+    }
 
     const socket = new WebSocket(wsUrl.toString());
 
     socket.onopen = () => {
       setIsConnected(true);
       setError(null);
-      reconnectDelay.current = RECONNECT_BASE_MS;
+      reconnectAttempts.current = 0;
       resubscribeAll();
     };
 
-    socket.onclose = (event) => {
+    socket.onclose = () => {
       setIsConnected(false);
-
-      if (!event.wasClean) {
-        const delay = reconnectDelay.current;
-        reconnectDelay.current = Math.min(delay * RECONNECT_MULTIPLIER, RECONNECT_MAX_MS);
-        reconnectTimeout.current = setTimeout(connect, delay);
-      }
+      ws.current = null;
+      scheduleReconnect(connect);
     };
 
     socket.onerror = () => {
@@ -80,7 +143,6 @@ export function useWebSocket(url: string | null, token: string | null) {
       try {
         const message: WebSocketMessage = JSON.parse(event.data);
 
-        // Respond to server-side heartbeat pings
         if (message.type === "ping") {
           sendRaw({ type: "pong" });
           return;
@@ -92,23 +154,37 @@ export function useWebSocket(url: string | null, token: string | null) {
           channelListeners.forEach((cb) => cb(message.data));
         }
       } catch {
-        // malformed frame – ignore
+        // Ignore malformed frames.
       }
     };
 
     ws.current = socket;
-  }, [url, token, resubscribeAll, sendRaw]);
+  }, [canConnect, clearReconnectTimer, resubscribeAll, scheduleReconnect, sendRaw, token, url]);
 
   useEffect(() => {
+    shouldReconnect.current = true;
+
+    if (!canConnect) {
+      disconnect();
+      return;
+    }
+
     connect();
-    return () => {
-      clearTimeout(reconnectTimeout.current);
-      if (ws.current) {
-        ws.current.onclose = null;
-        ws.current.close();
+
+    const handleOnline = () => {
+      if (!ws.current || ws.current.readyState === WebSocket.CLOSED) {
+        connect();
       }
     };
-  }, [connect]);
+
+    window.addEventListener("online", handleOnline);
+
+    return () => {
+      shouldReconnect.current = false;
+      window.removeEventListener("online", handleOnline);
+      disconnect();
+    };
+  }, [canConnect, connect, disconnect]);
 
   const subscribe = useCallback(
     (channel: string, callback: (data: any) => void, opts: SubscribeOptions = {}) => {
@@ -117,21 +193,18 @@ export function useWebSocket(url: string | null, token: string | null) {
       }
       listeners.current.get(channel)!.add(callback);
 
-      // Track subscription for re-send on reconnect
       subscriptions.current.set(channel, opts);
-
-      // Send subscription to server
       sendRaw({ type: "subscribe", channel, event_types: opts.eventTypes ?? [] });
 
       return () => {
         const set = listeners.current.get(channel);
-        if (set) {
-          set.delete(callback);
-          if (set.size === 0) {
-            listeners.current.delete(channel);
-            subscriptions.current.delete(channel);
-            sendRaw({ type: "unsubscribe", channel });
-          }
+        if (!set) return;
+
+        set.delete(callback);
+        if (set.size === 0) {
+          listeners.current.delete(channel);
+          subscriptions.current.delete(channel);
+          sendRaw({ type: "unsubscribe", channel });
         }
       };
     },

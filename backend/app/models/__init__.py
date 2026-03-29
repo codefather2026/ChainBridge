@@ -4,3 +4,5 @@ from .order import SwapOrder
 from .swap import CrossChainSwap
 from .api_key import APIKey
 from .dispute import SwapDispute
+from .transaction import ChainTransaction
+from .user import User

@@ -344,7 +344,7 @@ docker-compose down -v
 # Connect to PostgreSQL
 docker-compose exec postgres psql -U chainbridge -d chainbridge
 
-# Run database migrations (when implemented)
+# Run database migrations
 docker-compose exec backend alembic upgrade head
 
 # Create a new migration
@@ -354,6 +354,8 @@ docker-compose exec backend alembic revision --autogenerate -m "description"
 docker-compose down -v
 docker-compose up -d
 ```
+
+Schema documentation: `docs/DATABASE_SCHEMA.md`
 
 ### Redis Management
 

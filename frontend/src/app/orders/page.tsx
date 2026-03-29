@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Clock3, RefreshCw, Search, XCircle } from "lucide-react";
 
-import { Button, Card, Input, ToastContainer } from "@/components/ui";
+import { Button, Card, EmptyState, Input, ToastContainer } from "@/components/ui";
 import {
   DEMO_ORDER_OWNER,
   useMockOrders,
@@ -87,6 +87,7 @@ export default function OrdersPage() {
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const visibleOrders = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const hasAnyOrders = myOrders.length > 0;
 
   function pushToast(toast: Omit<ToastMessage, "id">) {
     setToasts((current) => [...current, { id: `${Date.now()}-${Math.random()}`, ...toast }]);
@@ -171,9 +172,27 @@ export default function OrdersPage() {
 
       <div className="mt-6 space-y-4">
         {visibleOrders.length === 0 ? (
-          <Card variant="raised" className="p-10 text-center text-text-secondary">
-            No orders match the current filters.
-          </Card>
+          <EmptyState
+            icon={<Search className="h-7 w-7" />}
+            title={hasAnyOrders ? "No matching orders" : "No orders created yet"}
+            description={
+              hasAnyOrders
+                ? "No orders match the selected status and search query. Clear filters to see all orders."
+                : "You have not created any orders for this profile yet. Start from the marketplace to post your first order."
+            }
+            action={
+              hasAnyOrders
+                ? {
+                    label: "Clear Filters",
+                    variant: "secondary",
+                    onClick: () => {
+                      setQuery("");
+                      setStatusFilter("all");
+                    },
+                  }
+                : { label: "Browse Market", href: "/marketplace" }
+            }
+          />
         ) : (
           visibleOrders.map((order) => (
             <Card key={order.id} variant="glass" className="p-5">
